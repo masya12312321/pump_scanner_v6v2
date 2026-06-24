@@ -1,0 +1,19 @@
+# Локальная база — на Render будет создаваться с нуля при каждом деплое,
+# если не подключить persistent disk (см. RENDER_DEPLOY.md)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Секреты — реальные ключи идут в Render Dashboard → Environment, не в git
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
