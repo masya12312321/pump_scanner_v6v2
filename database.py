@@ -71,6 +71,43 @@ async def init_db() -> None:
             value      REAL NOT NULL,
             updated_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS trading_settings (
+            id                    INTEGER PRIMARY KEY CHECK (id = 1),
+            paper_mode            INTEGER NOT NULL DEFAULT 1,
+            autotrade_enabled     INTEGER NOT NULL DEFAULT 0,
+            position_size_sol     REAL    NOT NULL DEFAULT 0.05,
+            take_profit_pct       REAL    NOT NULL DEFAULT 100.0,
+            stop_loss_pct         REAL    NOT NULL DEFAULT 30.0,
+            max_positions         INTEGER NOT NULL DEFAULT 5,
+            min_confidence_trade  INTEGER NOT NULL DEFAULT 55,
+            daily_loss_limit_sol  REAL    NOT NULL DEFAULT 1.0,
+            paper_balance_sol     REAL    NOT NULL DEFAULT 5.0,
+            updated_at            INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS positions (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            ca            TEXT NOT NULL,
+            symbol        TEXT NOT NULL,
+            mode          TEXT NOT NULL DEFAULT 'paper',
+            status        TEXT NOT NULL DEFAULT 'open',
+            sol_amount    REAL NOT NULL,
+            token_amount  REAL NOT NULL DEFAULT 0,
+            entry_price   REAL NOT NULL,
+            entry_mcap    REAL NOT NULL DEFAULT 0,
+            tp_price      REAL NOT NULL DEFAULT 0,
+            sl_price      REAL NOT NULL DEFAULT 0,
+            peak_price    REAL NOT NULL DEFAULT 0,
+            exit_price    REAL,
+            exit_reason   TEXT,
+            pnl_sol       REAL,
+            pnl_pct       REAL,
+            buy_tx        TEXT,
+            sell_tx       TEXT,
+            opened_at     INTEGER NOT NULL,
+            closed_at     INTEGER
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_open_ca ON positions(ca) WHERE status='open';
+        CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
         CREATE INDEX IF NOT EXISTS idx_seen_status   ON seen_tokens(status);
         CREATE INDEX IF NOT EXISTS idx_seen_retry    ON seen_tokens(next_retry);
         CREATE INDEX IF NOT EXISTS idx_alerts_ca     ON alerts(ca);
@@ -78,6 +115,26 @@ async def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_alerts_outcome ON alerts(outcome);
         CREATE INDEX IF NOT EXISTS idx_samples_result ON learning_samples(result);
     """)
+    import config as _cfg
+    await pool.execute(
+        "INSERT OR IGNORE INTO trading_settings "
+        "(id, paper_mode, autotrade_enabled, position_size_sol, take_profit_pct, "
+        " stop_loss_pct, max_positions, min_confidence_trade, daily_loss_limit_sol, "
+        " paper_balance_sol, updated_at) "
+        "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            1 if _cfg.DEFAULT_PAPER_MODE else 0,
+            1 if _cfg.DEFAULT_AUTOTRADE_ENABLED else 0,
+            _cfg.DEFAULT_POSITION_SIZE_SOL,
+            _cfg.DEFAULT_TAKE_PROFIT_PCT,
+            _cfg.DEFAULT_STOP_LOSS_PCT,
+            _cfg.DEFAULT_MAX_POSITIONS,
+            _cfg.DEFAULT_MIN_CONFIDENCE_TRADE,
+            _cfg.DEFAULT_DAILY_LOSS_LIMIT_SOL,
+            _cfg.DEFAULT_PAPER_BALANCE_SOL,
+            int(time.time()),
+        )
+    )
     log.info("DB initialised (v6)")
 
 
@@ -317,3 +374,127 @@ async def save_learned_weights(weights: dict[str, float]) -> None:
         "INSERT OR REPLACE INTO learned_weights (key, value, updated_at) VALUES (?, ?, ?)",
         [(k, v, now) for k, v in weights.items()]
     )
+
+
+# ─── TRADING: SETTINGS ─────────────────────────────────────────────────────────
+
+_TRADING_FIELDS = {
+    "paper_mode", "autotrade_enabled", "position_size_sol", "take_profit_pct",
+    "stop_loss_pct", "max_positions", "min_confidence_trade",
+    "daily_loss_limit_sol", "paper_balance_sol",
+}
+
+
+async def get_trading_settings() -> dict:
+    row = await pool.fetchone("SELECT * FROM trading_settings WHERE id=1")
+    d = dict(row)
+    d["paper_mode"]        = bool(d["paper_mode"])
+    d["autotrade_enabled"] = bool(d["autotrade_enabled"])
+    return d
+
+
+async def update_trading_settings(**kwargs) -> None:
+    """Partial update — e.g. update_trading_settings(take_profit_pct=80.0)."""
+    fields = {k: v for k, v in kwargs.items() if k in _TRADING_FIELDS}
+    if not fields:
+        return
+    if "paper_mode" in fields:
+        fields["paper_mode"] = 1 if fields["paper_mode"] else 0
+    if "autotrade_enabled" in fields:
+        fields["autotrade_enabled"] = 1 if fields["autotrade_enabled"] else 0
+    set_sql = ", ".join(f"{k}=?" for k in fields)
+    params = list(fields.values()) + [int(time.time())]
+    await pool.execute(
+        f"UPDATE trading_settings SET {set_sql}, updated_at=? WHERE id=1", tuple(params)
+    )
+
+
+# ─── TRADING: POSITIONS ────────────────────────────────────────────────────────
+
+async def get_open_position(ca: str) -> dict | None:
+    row = await pool.fetchone(
+        "SELECT * FROM positions WHERE ca=? AND status='open'", (ca,)
+    )
+    return dict(row) if row else None
+
+
+async def get_open_positions() -> list[dict]:
+    rows = await pool.fetchall(
+        "SELECT * FROM positions WHERE status='open' ORDER BY opened_at DESC"
+    )
+    return [dict(r) for r in rows]
+
+
+async def count_open_positions() -> int:
+    row = await pool.fetchone("SELECT COUNT(*) FROM positions WHERE status='open'")
+    return row[0] if row else 0
+
+
+async def open_position(
+    ca: str, symbol: str, mode: str, sol_amount: float, token_amount: float,
+    entry_price: float, entry_mcap: float, tp_price: float, sl_price: float,
+    buy_tx: str | None = None,
+) -> None:
+    await pool.execute(
+        "INSERT INTO positions "
+        "(ca, symbol, mode, status, sol_amount, token_amount, entry_price, entry_mcap, "
+        " tp_price, sl_price, peak_price, buy_tx, opened_at) "
+        "VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (ca, symbol, mode, sol_amount, token_amount, entry_price, entry_mcap,
+         tp_price, sl_price, entry_price, buy_tx, int(time.time()))
+    )
+
+
+async def update_position_peak(ca: str, peak_price: float) -> None:
+    await pool.execute(
+        "UPDATE positions SET peak_price=? WHERE ca=? AND status='open'",
+        (peak_price, ca)
+    )
+
+
+async def close_position(
+    ca: str, exit_price: float, exit_reason: str,
+    pnl_sol: float, pnl_pct: float, sell_tx: str | None = None,
+) -> None:
+    await pool.execute(
+        "UPDATE positions SET status='closed', exit_price=?, exit_reason=?, "
+        "pnl_sol=?, pnl_pct=?, sell_tx=?, closed_at=? "
+        "WHERE ca=? AND status='open'",
+        (exit_price, exit_reason, pnl_sol, pnl_pct, sell_tx, int(time.time()), ca)
+    )
+
+
+async def get_closed_positions(limit: int = 20) -> list[dict]:
+    rows = await pool.fetchall(
+        "SELECT * FROM positions WHERE status='closed' ORDER BY closed_at DESC LIMIT ?",
+        (limit,)
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_trading_stats() -> dict:
+    """Общая статистика по закрытым позициям: общий PnL, винрейт, кол-во сделок."""
+    row = await pool.fetchone(
+        "SELECT COUNT(*) AS n, "
+        "       COALESCE(SUM(pnl_sol), 0) AS total_pnl_sol, "
+        "       SUM(CASE WHEN pnl_sol > 0 THEN 1 ELSE 0 END) AS wins "
+        "FROM positions WHERE status='closed'"
+    )
+    n = row["n"] or 0
+    wins = row["wins"] or 0
+    return {
+        "trades_count":  n,
+        "wins":          wins,
+        "losses":        n - wins,
+        "win_rate":      (wins / n * 100) if n else 0.0,
+        "total_pnl_sol": row["total_pnl_sol"] or 0.0,
+    }
+
+
+async def get_daily_pnl_sol(since_ts: int) -> float:
+    row = await pool.fetchone(
+        "SELECT COALESCE(SUM(pnl_sol), 0) FROM positions "
+        "WHERE status='closed' AND closed_at >= ?",
+        (since_ts,)
+    )
+    return row[0] if row else 0.0

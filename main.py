@@ -21,6 +21,7 @@ from exit_signals import ExitSignalEngine
 from self_learning import training_loop, load_weights, save_sample
 from outcome_tracker import outcome_tracker_loop, init_outcome_tracker
 from x_milestone_tracker import milestone_tracker_loop, init_milestone_tracker
+from trading_engine import TradingEngine
 
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL, logging.INFO),
@@ -186,8 +187,11 @@ async def main() -> None:
     # init live X-multiplier milestone tracker
     init_milestone_tracker(bot, _dexscreener_sem)
 
+    # init торгового движка (paper/real, TP/SL мониторинг)
+    trading_engine = TradingEngine(bot)
+
     cache = get_cache()
-    register_commands(dp, stats, queues, exit_engine, cache)
+    register_commands(dp, stats, queues, exit_engine, cache, trading_engine)
 
     async def bl_tracker() -> None:
         while True:
@@ -202,6 +206,7 @@ async def main() -> None:
         asyncio.create_task(training_loop(),                            name="learning"),
         asyncio.create_task(outcome_tracker_loop(),                     name="outcomes"),
         asyncio.create_task(milestone_tracker_loop(),                   name="milestones"),
+        asyncio.create_task(trading_engine.monitor_loop(),               name="trading"),
         asyncio.create_task(bl_tracker(),                               name="bl"),
         *[
             asyncio.create_task(
@@ -213,7 +218,7 @@ async def main() -> None:
         ],
         *[
             asyncio.create_task(
-                alert_worker(bot, alert_queue, blacklist, stats, i+1),
+                alert_worker(bot, alert_queue, blacklist, stats, i+1, trading_engine),
                 name=f"alert_{i+1}"
             )
             for i in range(config.ALERT_WORKER_COUNT)

@@ -83,3 +83,31 @@ PRICE_HISTORY_LIMIT:  int = 20
 
 # X-Multiplier targets для расчёта тайминга выхода
 X_TARGETS: list[float] = [2.0, 5.0, 10.0, 50.0, 100.0]
+
+# ── АВТОТОРГОВЛЯ ──────────────────────────────────────────────────────────────
+# WALLET_PRIVATE_KEY нужен ТОЛЬКО для реального режима (/paper off).
+# Формат — base58 строка приватного ключа (как при экспорте из Phantom).
+# Ключ НИКОГДА не уходит на сторонние серверы: PumpPortal Local Transaction
+# API только собирает неподписанную транзакцию, подписываем её сами здесь
+# и отправляем через свой Helius RPC. Если переменная не задана — бот может
+# работать только в paper-режиме (симуляция, без реальных денег).
+WALLET_PRIVATE_KEY: str = os.getenv("WALLET_PRIVATE_KEY", "")
+
+PUMPPORTAL_TRADE_LOCAL_URL: str = "https://pumpportal.fun/api/trade-local"
+
+# Параметры по умолчанию — все переопределяются пользователем через Telegram
+# (/amount, /tp, /sl, /maxpos, /dailylimit) и хранятся в таблице trading_settings.
+DEFAULT_PAPER_MODE:            bool  = True     # старт всегда в симуляции
+DEFAULT_AUTOTRADE_ENABLED:     bool  = False    # автоторговля выключена, пока не включат явно
+DEFAULT_POSITION_SIZE_SOL:     float = 0.05      # сумма SOL на одну сделку
+DEFAULT_TAKE_PROFIT_PCT:       float = 100.0     # +100% = x2 → продать
+DEFAULT_STOP_LOSS_PCT:         float = 30.0      # -30% → продать
+DEFAULT_MAX_POSITIONS:         int   = 5         # максимум открытых позиций одновременно
+DEFAULT_MIN_CONFIDENCE_TRADE:  int   = 55        # строже чем порог алерта (MIN_CONFIDENCE_SCORE)
+DEFAULT_DAILY_LOSS_LIMIT_SOL:  float = 1.0       # дневной стоп-лосс на весь бот (kill-switch)
+DEFAULT_PAPER_BALANCE_SOL:     float = 5.0       # виртуальный баланс для paper-режима
+
+DEFAULT_SLIPPAGE_PCT:     int   = 15
+DEFAULT_PRIORITY_FEE_SOL: float = 0.0005
+
+TRADE_MONITOR_INTERVAL_SEC: float = 15.0   # как часто проверять TP/SL по открытым позициям
