@@ -347,6 +347,7 @@ def calculate_scores(
     pair_count:   int,
     ca:           str,
     blacklist:    set[str],
+    holders_count: int = 0,
 ) -> tuple[int, int, list[str], list[str]]:
 
     # pull live weights from self-learning module
@@ -360,6 +361,49 @@ def calculate_scores(
         return 0, 100, ["🚫 CA в блэклисте"], []
     if rc["is_honeypot"]:
         return 0, 100, ["🚫 HONEYPOT — продать невозможно"], []
+
+    # ── ЖЁСТКИЕ ФИЛЬТРЫ: если сработал любой — rug_score сразу ≥60 ──────────────
+    # rug_score > 60 в config: бот их всё равно зарежет на MIN_CONFIDENCE, но
+    # явно маркируем чтобы x_calculator тоже применил штраф
+    hard_fail = False
+
+    # Критически высокий rug_score от RugCheck → сразу мусор
+    if rc.get("rugcheck_score", 100) < 20:
+        hard_fail = True
+        rug_score += 50
+        risk_flags.append("🔴 RugCheck: крайне опасный токен")
+
+    # Слишком мало холдеров — нет реального интереса, легко манипулировать
+    if 0 < holders_count < 25:
+        confidence -= 20
+        rug_score  += 15
+        risk_flags.append(f"👻 Всего {holders_count} холдеров — почти никого")
+    elif 0 < holders_count < 50:
+        confidence -= 10
+        risk_flags.append(f"⚠️ Мало холдеров: {holders_count}")
+    elif holders_count >= 200:
+        confidence += 8
+        green_flags.append(f"✅ {holders_count} холдеров — широкое распределение")
+
+    # Ликвидность / MCap ratio — признак накрутки объёма без реальных покупателей
+    if mcap > 0 and liquidity > 0:
+        liq_ratio = liquidity / mcap
+        if liq_ratio < 0.01:   # ликвидность < 1% от MCap — насос без основы
+            confidence -= 15
+            rug_score  += 15
+            risk_flags.append("💧 Ликвидность < 1% от MCap — манипуляция ценой")
+        elif liq_ratio > 0.10:
+            confidence += 8
+            green_flags.append("✅ Хорошая ликвидность относительно MCap")
+
+    # Падающая цена у немолодого токена — пик уже прошёл
+    if "DOWN" in momentum and age_min > 3:
+        confidence -= 15
+        rug_score  += 10
+        risk_flags.append("📉 Цена падает после 3 мин — пик скорее всего позади")
+
+    if hard_fail:
+        confidence = min(confidence, 20)
 
     # ── DEAD TOKEN hard penalty ──
     if volume_5m == 0 and age_min > 3:
@@ -401,8 +445,11 @@ def calculate_scores(
     elif top1_pct > 30:
         confidence -= 12; rug_score += 20
         risk_flags.append("🐋 Топ-1 — высокая концентрация")
+    elif 0 < top1_pct < 10:
+        confidence += 15
+        green_flags.append("✅ Отличное распределение — топ-1 < 10%")
     elif 0 < top1_pct < 15:
-        confidence += 12
+        confidence += 10
     if top5_pct > 70:
         confidence -= 8; rug_score += 10
         risk_flags.append("⚠️ Топ-5 держат большую долю")
@@ -413,11 +460,14 @@ def calculate_scores(
 
     # ── liquidity — weighted ──
     liq_w = w.get("liquidity", 0.12)
-    if liquidity < 200:
-        confidence -= int(12 * liq_w / 0.12)
+    if liquidity < 500:
+        confidence -= int(15 * liq_w / 0.12)
         risk_flags.append("⚠️ Критически низкая ликвидность")
-    elif liquidity > 3_000:
-        confidence += int(12 * liq_w / 0.12)
+    elif liquidity > 5_000:
+        confidence += int(15 * liq_w / 0.12)
+        green_flags.append("✅ Высокая ликвидность")
+    elif liquidity > 2_000:
+        confidence += int(10 * liq_w / 0.12)
     elif liquidity > 1_000:
         confidence += int(6 * liq_w / 0.12)
 
@@ -426,56 +476,71 @@ def calculate_scores(
     if mcap > 0 and volume_15m > 0:
         vol_ratio = volume_15m / mcap
         if vol_ratio > 2:
-            confidence += int(8 * vol_w / 0.10)
+            confidence += int(10 * vol_w / 0.10)
+            green_flags.append("✅ Высокий объём / MCap")
         elif vol_ratio > 0.5:
-            confidence += int(4 * vol_w / 0.10)
+            confidence += int(5 * vol_w / 0.10)
         elif vol_ratio < 0.05:
-            confidence -= int(5 * vol_w / 0.10)
+            confidence -= int(8 * vol_w / 0.10)
             risk_flags.append("⚠️ Низкий объём относительно MCap")
+    elif age_min > 5 and volume_15m == 0:
+        confidence -= 12
+        risk_flags.append("⚠️ Нет объёма за 15 мин")
 
     # ── age ──
     if age_min < 1:
-        confidence -= 3
-    elif age_min > 5:
+        confidence -= 5   # слишком рано, данных почти нет
+    elif age_min > 8:
+        confidence -= 5   # слишком поздно, пик уже мог пройти
+    elif age_min > 3:
         confidence += 7
 
     # ── momentum — weighted ──
     mom_w = w.get("momentum", 0.15)
     if "UP" in momentum:
-        confidence += int(10 * mom_w / 0.15)
+        confidence += int(12 * mom_w / 0.15)
         green_flags.append("✅ Цена растёт")
     elif "DOWN" in momentum:
-        confidence -= int(10 * mom_w / 0.15)
-        risk_flags.append("📉 Цена падает")
+        confidence -= int(12 * mom_w / 0.15)
+        # (флаг уже добавлен выше если age > 3)
 
     # ── rugcheck score ──
     rc_score = rc.get("rugcheck_score", 0)
     if rc_score > 80:
-        confidence += 15; rug_score = max(0, rug_score - 10)
+        confidence += 18; rug_score = max(0, rug_score - 10)
+        green_flags.append("✅ RugCheck: чистый токен")
+    elif rc_score > 60:
+        confidence += 8
     elif 0 < rc_score < 40:
-        confidence -= 15; rug_score += 10
+        confidence -= 18; rug_score += 12
         risk_flags.append("🔴 RugCheck отмечает риски")
+    elif 0 < rc_score < 60:
+        confidence -= 8; rug_score += 5
 
     # ── creator score — weighted (heaviest factor) ──
     cr_w = w.get("creator_score", 0.25)
     if creator_score >= 70:
-        confidence += int(10 * cr_w / 0.25)
-    elif creator_score <= 30:
+        confidence += int(12 * cr_w / 0.25)
+        green_flags.append("✅ Надёжный создатель")
+    elif creator_score <= 20:
+        confidence -= int(20 * cr_w / 0.25); rug_score += 20
+        risk_flags.append("💀 Плохая история создателя")
+    elif creator_score <= 40:
         confidence -= int(15 * cr_w / 0.25); rug_score += 15
-        risk_flags.append("💀 Слабая история создателя")
+        risk_flags.append("⚠️ Слабая история создателя")
     elif creator_score >= 50:
-        confidence += int(3 * cr_w / 0.25)
+        confidence += int(5 * cr_w / 0.25)
 
     # ── multi-dex migration (bullish) ──
     if on_raydium:
-        confidence += 12
+        confidence += 14
         green_flags.append("🟢 Ликвидность на Raydium — бычий сигнал")
     if on_meteora:
         confidence += 8
         green_flags.append("🟢 Ликвидность на Meteora")
     if pair_count >= 3:
         confidence += 5
-        green_flags.append(f"✅ {pair_count} торговых пар — широкое распределение")
+        green_flags.append(f"✅ {pair_count} торговых пар")
 
     return (
         max(0, min(100, confidence)),
@@ -626,6 +691,7 @@ async def analyze_token(
         pair_count   = pair_count,
         ca           = ca,
         blacklist    = blacklist,
+        holders_count = holder_info.get("holders_count", 0),
     )
 
     c_stats  = creator_res if isinstance(creator_res, dict) else None

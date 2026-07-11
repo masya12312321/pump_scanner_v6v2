@@ -46,9 +46,9 @@ RETRY_DELAYS: list[int] = [30, 60, 120]
 MAX_RETRIES:  int = 3
 
 # Filters
-MIN_CONFIDENCE_SCORE: int   = 35       # чуть ниже чтобы не пропускать хорошие монеты
+MIN_CONFIDENCE_SCORE: int   = 50       # подняли с 35 — отсекаем мусор
 MAX_AGE_MINUTES:      float = 15.0
-MIN_LIQUIDITY_USD:    float = 200.0
+MIN_LIQUIDITY_USD:    float = 500.0       # подняли с 200 — меньше pump-and-dump
 AUTO_COOLDOWN_DROP:   float = 0.20
 
 # ── ЖЁСТКИЙ ПОТОЛОК MCAP ──────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ DEFAULT_POSITION_SIZE_SOL:     float = 0.05      # сумма SOL на одну 
 DEFAULT_TAKE_PROFIT_PCT:       float = 100.0     # +100% = x2 → продать
 DEFAULT_STOP_LOSS_PCT:         float = 30.0      # -30% → продать
 DEFAULT_MAX_POSITIONS:         int   = 5         # максимум открытых позиций одновременно
-DEFAULT_MIN_CONFIDENCE_TRADE:  int   = 55        # строже чем порог алерта (MIN_CONFIDENCE_SCORE)
+DEFAULT_MIN_CONFIDENCE_TRADE:  int   = 65        # строже чем порог алерта
 DEFAULT_DAILY_LOSS_LIMIT_SOL:  float = 1.0       # дневной стоп-лосс на весь бот (kill-switch)
 DEFAULT_PAPER_BALANCE_SOL:     float = 5.0       # виртуальный баланс для paper-режима
 

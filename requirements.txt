@@ -3,8 +3,5 @@ aiohttp==3.9.5
 aiosqlite==0.20.0
 python-dotenv==1.0.1
 matplotlib>=3.9.0
-<<<<<<< HEAD
 solders>=0.21,<1.0
 base58>=2.1.1
-=======
->>>>>>> d55bb8df56b0d0e767bf9681d43a4a72ba60ed1e

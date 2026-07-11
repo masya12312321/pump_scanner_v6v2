@@ -197,21 +197,14 @@ class ExitSignalEngine:
             return {}
 
     async def _send(self, snap: TokenSnapshot, reasons: list[str]) -> None:
-        risk       = "HIGH" if len(reasons) >= 2 else "MEDIUM"
-        risk_emoji = "🔴" if risk == "HIGH" else "🟠"
-        lines      = "\n".join(f"• {r}" for r in reasons)
+        risk_emoji = "🔴" if len(reasons) >= 2 else "🟠"
+        reasons_str = " · ".join(reasons)
+        dex = f"https://dexscreener.com/solana/{snap.ca}"
         msg = (
-            f"⚠️ <b>EXIT SIGNAL</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🪙 Token: <b>{snap.symbol}</b>\n\n"
-            f"🚨 <b>Причина:</b>\n{lines}\n\n"
-            f"{risk_emoji} Risk: <b>{risk}</b>\n\n"
-            f"💰 Цена: <b>${snap.price:.8f}</b>\n"
-            f"💧 Ликвидность: <b>${snap.liquidity:,.0f}</b>\n\n"
-            f"<code>{snap.ca}</code>\n\n"
-            f"<a href='https://pump.fun/{snap.ca}'>Pump.fun</a> | "
-            f"<a href='https://dexscreener.com/solana/{snap.ca}'>Dex</a>\n"
-            f"━━━━━━━━━━━━━━━━━━━━"
+            f"{risk_emoji} <b>EXIT {snap.symbol}</b>\n"
+            f"{reasons_str}\n"
+            f"💰 ${snap.price:.8f} · 💧 ${snap.liquidity:,.0f}\n"
+            f"<a href='{dex}'>Dexscreener</a> · <code>{snap.ca[:16]}…</code>"
         )
         try:
             await self._bot.send_message(
