@@ -37,7 +37,6 @@ from database import (
     get_open_positions,
     open_position as db_open_position,
     update_position_peak,
-    update_trailing_sl,
     close_position as db_close_position,
     get_daily_pnl_sol,
 )
@@ -186,35 +185,14 @@ class TradingEngine:
         price = dex.get("price", 0.0)
         if price <= 0:
             return
-
-        entry  = pos["entry_price"]
-        tp     = pos["tp_price"]
-        sl     = pos["sl_price"]
-        peak   = pos.get("peak_price") or entry
-
-        # ── Trailing Stop-Loss ─────────────────────────────────────────────────
-        # Если цена выросла на 30%+ от входа — подтягиваем SL так, чтобы
-        # при откате не более чем на 20% от пика мы выходили в плюсе.
-        # Trailing SL срабатывает только вверх — никогда не опускается.
-        if price > peak:
+        if price > pos.get("peak_price", 0):
             await update_position_peak(pos["ca"], price)
-            peak = price
-
-        # активируем trailing когда цена выросла на 30%+ от входа
-        trailing_gain_threshold = entry * 1.30
-        if peak >= trailing_gain_threshold and entry > 0:
-            trailing_sl = peak * 0.80   # SL = 20% откат от пика
-            if trailing_sl > sl:
-                sl = trailing_sl
-                # обновляем SL в БД чтобы следующий тик знал новый уровень
-                await update_trailing_sl(pos["ca"], sl)
 
         reason = None
-        if price >= tp:
+        if price >= pos["tp_price"]:
             reason = "take_profit"
-        elif price <= sl:
-            reason = "stop_loss" if price <= pos["sl_price"] else "trailing_stop"
-
+        elif price <= pos["sl_price"]:
+            reason = "stop_loss"
         if reason:
             await self._close_position(pos, price, reason)
 
@@ -248,9 +226,7 @@ class TradingEngine:
 
         tag = "📝 PAPER" if pos["mode"] == "paper" else "💸 РЕАЛЬНАЯ"
         emoji = "🟢" if pnl_sol >= 0 else "🔴"
-        if reason == "take_profit":      reason_str = "🎯 Take Profit"
-        elif reason == "trailing_stop":  reason_str = "📈 Trailing Stop"
-        else:                            reason_str = "🛑 Stop Loss"
+        reason_str = "🎯 Take Profit" if reason == "take_profit" else "🛑 Stop Loss"
         await self._notify(
             f"{tag} ПРОДАЖА: <b>{pos['symbol']}</b> — {reason_str}\n"
             f"{emoji} PnL: <b>{pnl_pct:+.1f}%</b> ({pnl_sol:+.4f} SOL)\n"

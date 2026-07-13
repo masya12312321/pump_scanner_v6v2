@@ -452,14 +452,6 @@ async def update_position_peak(ca: str, peak_price: float) -> None:
     )
 
 
-async def update_trailing_sl(ca: str, new_sl: float) -> None:
-    """Поднимаем SL вверх (trailing). Никогда не опускаем — только если new_sl > текущего."""
-    await pool.execute(
-        "UPDATE positions SET sl_price=? WHERE ca=? AND status='open' AND sl_price < ?",
-        (new_sl, ca, new_sl)
-    )
-
-
 async def close_position(
     ca: str, exit_price: float, exit_reason: str,
     pnl_sol: float, pnl_pct: float, sell_tx: str | None = None,

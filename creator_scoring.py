@@ -71,30 +71,11 @@ async def record_outcome(wallet: str, outcome: str, lifetime_minutes: float = 0.
     # recompute and persist score
     row = await pool.fetchone("SELECT * FROM creator_stats WHERE creator=?", (wallet,))
     if row:
-        s     = dict(row)
-        score = _compute_score(s)
+        score = _compute_score(dict(row))
         await pool.execute(
             "UPDATE creator_stats SET score=?, last_update=? WHERE creator=?",
             (score, int(time.time()), wallet)
         )
-        # ── AUTO-BLACKLIST серийных rugger-ов ─────────────────────────────────
-        # Если создатель набрал 5+ rugов при rug_rate > 80% — блэклистим
-        # его кошелёк: любые новые токены от него будут заблокированы до анализа.
-        rugged = s.get("tokens_rugged", 0)
-        total  = max(s.get("tokens_created", 1), 1)
-        if rugged >= 5 and (rugged / total) >= 0.80:
-            exists = await pool.fetchone(
-                "SELECT 1 FROM blacklist WHERE ca=?", (wallet,)
-            )
-            if not exists:
-                await pool.execute(
-                    "INSERT OR IGNORE INTO blacklist (ca, reason, added_at) VALUES (?, ?, ?)",
-                    (wallet, f"auto: серийный rugger ({rugged}/{total} rug)", int(time.time()))
-                )
-                log.warning(
-                    f"AUTO-BLACKLIST creator {wallet[:12]}… "
-                    f"— {rugged}/{total} rug токенов ({rugged/total*100:.0f}%)"
-                )
 
 
 async def get_creator_score(wallet: str) -> dict:
