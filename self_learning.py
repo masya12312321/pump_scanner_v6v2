@@ -21,7 +21,7 @@ DEFAULT_WEIGHTS = {
     "freeze_authority": 0.05,
 }
 
-TRAIN_INTERVAL_SEC = 86_400
+TRAIN_INTERVAL_SEC = 21_600   # каждые 6 часов (было 24ч)
 MIN_SAMPLES        = 20
 LEARNING_RATE      = 0.05
 
