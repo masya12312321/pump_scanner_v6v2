@@ -5,7 +5,9 @@ websocket.py — pump.fun WebSocket listener
 import asyncio
 import json
 import logging
+import re
 import time
+from collections import defaultdict
 
 import aiohttp
 
@@ -13,6 +15,32 @@ import config
 from database import is_seen, mark_pending
 
 log = logging.getLogger("WS")
+
+# Дедупликация клонов: PEPE / PEPE2 / PEPE_v2 / 100PEPE → один базовый символ.
+# Не более 3 токенов с одним базовым именем за скользящий час.
+_symbol_seen: dict[str, list[float]] = defaultdict(list)
+_CLONE_WINDOW  = 3600   # 1 час
+_CLONE_MAX     = 3      # макс токенов с одним именем за окно
+
+
+def _base_symbol(symbol: str) -> str:
+    """PEPE2 / PEPE_V3 / 100PEPE → PEPE"""
+    s = symbol.upper().strip()
+    s = re.sub(r"[^A-Z]", "", s)   # убираем цифры, пробелы, спецсимволы
+    return s[:12]                   # обрезаем длинные хвосты
+
+
+def _is_clone_spam(symbol: str) -> bool:
+    base = _base_symbol(symbol)
+    if not base:
+        return False
+    now  = time.time()
+    cutoff = now - _CLONE_WINDOW
+    _symbol_seen[base] = [t for t in _symbol_seen[base] if t > cutoff]
+    if len(_symbol_seen[base]) >= _CLONE_MAX:
+        return True
+    _symbol_seen[base].append(now)
+    return False
 
 
 async def pump_ws_listener(
@@ -87,6 +115,11 @@ async def _handle_message(
 
     symbol = data.get("symbol") or data.get("ticker") or "???"
     name   = data.get("name") or symbol
+
+    # фильтр клонов: не более 3 токенов с одним базовым символом за час
+    if _is_clone_spam(symbol):
+        log.debug(f"CLONE SKIP: {symbol} (слишком много клонов за час)")
+        return
 
     token_event = {
         "ca":           mint,
