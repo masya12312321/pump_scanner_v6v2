@@ -78,11 +78,9 @@ def _format_elapsed(seconds: int) -> str:
 
 
 def _format_timestamp(ts: float) -> str:
-    """Формат: '5 06:38' по МСК (UTC+3)."""
+    """Формат как на скриншоте: '5 06:38' (день · часы:минуты)."""
     dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-    from datetime import timedelta
-    dt_msk = dt + timedelta(hours=3)
-    return f"{dt_msk.day} {dt_msk.strftime('%H:%M')} МСК"
+    return f"{dt.day} {dt.strftime('%H:%M')}"
 
 
 async def milestone_tracker_loop() -> None:

@@ -487,16 +487,6 @@ def calculate_scores(
         confidence -= 12
         risk_flags.append("⚠️ Нет объёма за 15 мин")
 
-    # ── volume spike: объём за 5м >> 3× от среднего за 15м → сильный сигнал ──
-    if volume_5m > 0 and volume_15m > 0:
-        avg_5m_rate = volume_15m / 3          # средний объём за 5м-интервал
-        if volume_5m > avg_5m_rate * 4:
-            confidence += 15
-            green_flags.append("🚀 Объём за 5м в 4× выше среднего — ускорение!")
-        elif volume_5m > avg_5m_rate * 2:
-            confidence += 8
-            green_flags.append("📈 Объём за 5м в 2× выше среднего")
-
     # ── age ──
     if age_min < 1:
         confidence -= 5   # слишком рано, данных почти нет
@@ -605,13 +595,12 @@ async def analyze_token(
     session:   aiohttp.ClientSession,
     blacklist: set[str],
 ) -> "TokenAnalysis | None":
-    ca         = token["ca"]
-    symbol     = token["symbol"]
-    name       = token["name"]
-    creator    = token.get("creator", "")
-    ts_ms      = token.get("timestamp_ms", int(time.time() * 1000))
-    age_min    = (time.time() * 1000 - ts_ms) / 60_000
-    sol_amount = float(token.get("sol_amount", 0.0))  # сколько SOL залил создатель при запуске
+    ca      = token["ca"]
+    symbol  = token["symbol"]
+    name    = token["name"]
+    creator = token.get("creator", "")
+    ts_ms   = token.get("timestamp_ms", int(time.time() * 1000))
+    age_min = (time.time() * 1000 - ts_ms) / 60_000
 
     if ca in blacklist:
         return None
@@ -709,19 +698,6 @@ async def analyze_token(
     c_risks, c_greens = creator_flags(c_stats, creator_score)
     risk_flags  = c_risks  + risk_flags
     green_flags = c_greens + green_flags
-
-    # ── SOL_AMOUNT БУСТ ────────────────────────────────────────────────────────
-    # Сколько SOL создатель залил при запуске токена — это реальный skin-in-the-game.
-    # Если создатель вложил много — у него есть мотивация не ругать сразу.
-    # Данные приходят прямо из WebSocket payload (поле solAmount).
-    if sol_amount >= 5.0:
-        confidence = min(100, confidence + 12)
-        green_flags.append(f"💰 Создатель залил {sol_amount:.1f} SOL — серьёзный старт")
-    elif sol_amount >= 2.0:
-        confidence = min(100, confidence + 7)
-        green_flags.append(f"💰 Старт: {sol_amount:.1f} SOL")
-    elif sol_amount >= 0.5:
-        confidence = min(100, confidence + 3)
 
     return TokenAnalysis(
         ca             = ca,
