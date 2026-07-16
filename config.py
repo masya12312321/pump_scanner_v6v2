@@ -33,21 +33,21 @@ RETRY_QUEUE_SIZE:      int = 500
 ALERT_QUEUE_SIZE:      int = 200
 
 # Workers
-ANALYSIS_WORKER_COUNT: int = 10
-ALERT_WORKER_COUNT:    int = 2
+ANALYSIS_WORKER_COUNT: int = 20   # было 10
+ALERT_WORKER_COUNT:    int = 3
 
 # Semaphore limits
-HELIUS_CONCURRENCY:      int = 10
-RUGCHECK_CONCURRENCY:    int = 5
-DEXSCREENER_CONCURRENCY: int = 5
+HELIUS_CONCURRENCY:      int = 20
+RUGCHECK_CONCURRENCY:    int = 8
+DEXSCREENER_CONCURRENCY: int = 10
 
 # Retry
 RETRY_DELAYS: list[int] = [30, 60, 120]
 MAX_RETRIES:  int = 3
 
 # Filters
-MIN_CONFIDENCE_SCORE: int   = 50       # подняли с 35 — отсекаем мусор
-MAX_AGE_MINUTES:      float = 15.0
+MIN_CONFIDENCE_SCORE: int   = 40       # было 50 — снижаем чтобы больше алертов
+MAX_AGE_MINUTES:      float = 30.0     # было 15 — даём токенам больше времени
 MIN_LIQUIDITY_USD:    float = 500.0       # подняли с 200 — меньше pump-and-dump
 AUTO_COOLDOWN_DROP:   float = 0.20
 
@@ -72,9 +72,9 @@ KNOWN_MAJOR_TOKENS: set[str] = {
 }
 
 # Timeouts
-RUGCHECK_TIMEOUT:     float = 5.0
-HELIUS_TIMEOUT:       float = 6.0
-DEXSCREENER_TIMEOUT:  float = 5.0
+RUGCHECK_TIMEOUT:     float = 3.5
+HELIUS_TIMEOUT:       float = 4.0
+DEXSCREENER_TIMEOUT:  float = 3.5
 WS_HEARTBEAT:         float = 30.0
 WS_RECONNECT_DELAY:   float = 3.0
 
@@ -97,17 +97,21 @@ PUMPPORTAL_TRADE_LOCAL_URL: str = "https://pumpportal.fun/api/trade-local"
 
 # Параметры по умолчанию — все переопределяются пользователем через Telegram
 # (/amount, /tp, /sl, /maxpos, /dailylimit) и хранятся в таблице trading_settings.
-DEFAULT_PAPER_MODE:            bool  = True     # старт всегда в симуляции
-DEFAULT_AUTOTRADE_ENABLED:     bool  = False    # автоторговля выключена, пока не включат явно
-DEFAULT_POSITION_SIZE_SOL:     float = 0.05      # сумма SOL на одну сделку
-DEFAULT_TAKE_PROFIT_PCT:       float = 100.0     # +100% = x2 → продать
-DEFAULT_STOP_LOSS_PCT:         float = 30.0      # -30% → продать
-DEFAULT_MAX_POSITIONS:         int   = 5         # максимум открытых позиций одновременно
-DEFAULT_MIN_CONFIDENCE_TRADE:  int   = 65        # строже чем порог алерта
-DEFAULT_DAILY_LOSS_LIMIT_SOL:  float = 1.0       # дневной стоп-лосс на весь бот (kill-switch)
-DEFAULT_PAPER_BALANCE_SOL:     float = 5.0       # виртуальный баланс для paper-режима
+DEFAULT_PAPER_MODE:            bool  = True
+DEFAULT_AUTOTRADE_ENABLED:     bool  = False
+DEFAULT_POSITION_SIZE_SOL:     float = 0.05
+DEFAULT_TAKE_PROFIT_PCT:       float = 100.0
+DEFAULT_STOP_LOSS_PCT:         float = 30.0
+DEFAULT_MAX_POSITIONS:         int   = 5
+DEFAULT_MIN_CONFIDENCE_TRADE:  int   = 55
+DEFAULT_DAILY_LOSS_LIMIT_SOL:  float = 1.0
+DEFAULT_PAPER_BALANCE_SOL:     float = 5.0
 
 DEFAULT_SLIPPAGE_PCT:     int   = 15
 DEFAULT_PRIORITY_FEE_SOL: float = 0.0005
 
-TRADE_MONITOR_INTERVAL_SEC: float = 15.0   # как часто проверять TP/SL по открытым позициям
+TRADE_MONITOR_INTERVAL_SEC: float = 15.0
+
+# Trailing stop — активируется при росте на X%, SL подтягивается до пика*(1-Y%)
+TRAILING_ACTIVATE_PCT: float = 50.0   # +50% от входа (было +30% — слишком агрессивно)
+TRAILING_PULLBACK_PCT: float = 30.0   # 30% откат от пика допускаем (было 20%)

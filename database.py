@@ -452,6 +452,36 @@ async def update_position_peak(ca: str, peak_price: float) -> None:
     )
 
 
+async def update_trailing_sl(ca: str, new_sl: float) -> None:
+    """Поднимаем SL вверх (trailing). Никогда не опускаем — только если new_sl > текущего."""
+    await pool.execute(
+        "UPDATE positions SET sl_price=? WHERE ca=? AND status='open' AND sl_price < ?",
+        (new_sl, ca, new_sl)
+    )
+
+
+async def update_open_positions_tpsl(tp_pct: float, sl_pct: float) -> int:
+    """Пересчитывает TP и SL для всех открытых позиций по новым процентам.
+    Вызывается из /tp и /sl чтобы изменение настроек сразу применялось.
+    Возвращает кол-во затронутых позиций."""
+    positions = await get_open_positions()
+    if not positions:
+        return 0
+    count = 0
+    for p in positions:
+        entry = p["entry_price"]
+        if entry <= 0:
+            continue
+        new_tp = entry * (1 + tp_pct / 100)
+        new_sl = entry * (1 - sl_pct / 100)
+        await pool.execute(
+            "UPDATE positions SET tp_price=?, sl_price=? WHERE ca=? AND status='open'",
+            (new_tp, new_sl, p["ca"])
+        )
+        count += 1
+    return count
+
+
 async def close_position(
     ca: str, exit_price: float, exit_reason: str,
     pnl_sol: float, pnl_pct: float, sell_tx: str | None = None,

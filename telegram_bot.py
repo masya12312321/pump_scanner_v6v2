@@ -21,7 +21,7 @@ from database import (
     get_trading_settings, update_trading_settings,
     get_open_positions, get_closed_positions,
     get_trading_stats, count_open_positions,
-    get_daily_pnl_sol,
+    get_daily_pnl_sol, update_open_positions_tpsl,
 )
 
 log = logging.getLogger("TelegramBot")
@@ -145,10 +145,7 @@ async def alert_worker(
         sig = None
         try:
             sig = await alert_queue.get()
-            if sig.is_honeypot:
-                blacklist.add(sig.ca)
-                await add_blacklist(sig.ca, "honeypot")
-                continue
+            # honeypot больше не блокирует алерт — показываем с предупреждением
             msg = build_alert_message(sig)
             await bot.send_message(
                 chat_id=config.CHAT_ID, text=msg,
@@ -483,8 +480,8 @@ def register_commands(
     @dp.message(Command("tp"))
     async def cmd_tp(m: Message) -> None:
         args = m.text.split()[1:]
+        s = await get_trading_settings()
         if not args:
-            s = await get_trading_settings()
             await m.answer(
                 f"🎯 Take Profit: <b>+{s['take_profit_pct']:.0f}%</b>\n"
                 f"Изменить: /tp 100",
@@ -499,13 +496,16 @@ def register_commands(
             await m.answer("Укажи положительный процент, например: /tp 100")
             return
         await update_trading_settings(take_profit_pct=val)
-        await m.answer(f"✅ Take Profit: <b>+{val:.0f}%</b>", parse_mode="HTML")
+        # сразу обновляем открытые позиции
+        updated = await update_open_positions_tpsl(val, s["stop_loss_pct"])
+        note = f"\n📂 Обновлено {updated} открытых позиций" if updated else ""
+        await m.answer(f"✅ Take Profit: <b>+{val:.0f}%</b>{note}", parse_mode="HTML")
 
     @dp.message(Command("sl"))
     async def cmd_sl(m: Message) -> None:
         args = m.text.split()[1:]
+        s = await get_trading_settings()
         if not args:
-            s = await get_trading_settings()
             await m.answer(
                 f"🛑 Stop Loss: <b>-{s['stop_loss_pct']:.0f}%</b>\n"
                 f"Изменить: /sl 30",
@@ -514,13 +514,16 @@ def register_commands(
             return
         try:
             val = float(args[0].replace(",", "."))
-            if not (0 < val < 100):
+            if not (0 < val <= 99):
                 raise ValueError
         except ValueError:
-            await m.answer("Укажи процент от 0 до 100, например: /sl 30")
+            await m.answer("Укажи процент от 1 до 99, например: /sl 30")
             return
         await update_trading_settings(stop_loss_pct=val)
-        await m.answer(f"✅ Stop Loss: <b>-{val:.0f}%</b>", parse_mode="HTML")
+        # сразу обновляем открытые позиции
+        updated = await update_open_positions_tpsl(s["take_profit_pct"], val)
+        note = f"\n📂 Обновлено {updated} открытых позиций" if updated else ""
+        await m.answer(f"✅ Stop Loss: <b>-{val:.0f}%</b>{note}", parse_mode="HTML")
 
     @dp.message(Command("maxpos"))
     async def cmd_maxpos(m: Message) -> None:

@@ -159,15 +159,12 @@ async def get_largest_accounts(session: aiohttp.ClientSession, ca: str) -> dict:
     cached = await cache.get("largest_accounts", ca)
     if cached is not None:
         return cached
-    async with _helius_sem:
-        try:
-            data = await _helius_post(session, {
-                "jsonrpc": "2.0", "id": 1,
-                "method": "getTokenLargestAccounts",
-                "params": [ca],
-            })
-        except Exception:
-            return {}
+    # _helius_post уже захватывает _helius_sem внутри — не оборачиваем снаружи
+    data = await _helius_post(session, {
+        "jsonrpc": "2.0", "id": 1,
+        "method": "getTokenLargestAccounts",
+        "params": [ca],
+    })
     value = data.get("result", {}).get("value", []) or []
     if not value:
         return {}
@@ -359,8 +356,13 @@ def calculate_scores(
 
     if ca in blacklist:
         return 0, 100, ["🚫 CA в блэклисте"], []
+
+    # Honeypot — больше не блокируем полностью, только сильный штраф.
+    # Детектор иногда ошибается, лучше показать алерт с предупреждением.
     if rc["is_honeypot"]:
-        return 0, 100, ["🚫 HONEYPOT — продать невозможно"], []
+        confidence -= 40
+        rug_score  += 50
+        risk_flags.append("🚫 ВОЗМОЖНЫЙ HONEYPOT — продать может быть невозможно")
 
     # ── ЖЁСТКИЕ ФИЛЬТРЫ: если сработал любой — rug_score сразу ≥60 ──────────────
     # rug_score > 60 в config: бот их всё равно зарежет на MIN_CONFIDENCE, но
@@ -487,6 +489,16 @@ def calculate_scores(
         confidence -= 12
         risk_flags.append("⚠️ Нет объёма за 15 мин")
 
+    # ── volume spike: объём за 5м >> 3× от среднего за 15м → сильный сигнал ──
+    if volume_5m > 0 and volume_15m > 0:
+        avg_5m_rate = volume_15m / 3          # средний объём за 5м-интервал
+        if volume_5m > avg_5m_rate * 4:
+            confidence += 15
+            green_flags.append("🚀 Объём за 5м в 4× выше среднего — ускорение!")
+        elif volume_5m > avg_5m_rate * 2:
+            confidence += 8
+            green_flags.append("📈 Объём за 5м в 2× выше среднего")
+
     # ── age ──
     if age_min < 1:
         confidence -= 5   # слишком рано, данных почти нет
@@ -595,37 +607,25 @@ async def analyze_token(
     session:   aiohttp.ClientSession,
     blacklist: set[str],
 ) -> "TokenAnalysis | None":
-    ca      = token["ca"]
-    symbol  = token["symbol"]
-    name    = token["name"]
-    creator = token.get("creator", "")
-    ts_ms   = token.get("timestamp_ms", int(time.time() * 1000))
-    age_min = (time.time() * 1000 - ts_ms) / 60_000
+    ca         = token["ca"]
+    symbol     = token["symbol"]
+    name       = token["name"]
+    creator    = token.get("creator", "")
+    ts_ms      = token.get("timestamp_ms", int(time.time() * 1000))
+    age_min    = (time.time() * 1000 - ts_ms) / 60_000
+    sol_amount = float(token.get("sol_amount", 0.0))  # сколько SOL залил создатель при запуске
 
     if ca in blacklist:
         return None
-
-    # ── ХАРДКОД-ФИЛЬТР: известные стейблкоины и мейджоры ──────────────────────
-    # USDC/USDT/SOL/etc никогда не должны анализироваться как "новый мемкоин",
-    # вне зависимости от того, что пришло из pump.fun WS. Проверка мгновенная,
-    # без единого сетевого запроса — отсекаем до того как потратим API-лимиты.
     if ca in config.KNOWN_MAJOR_TOKENS:
-        log.info(f"SKIP known major token: {symbol} ({ca[:8]}...)")
         return None
 
-    # ── РАННЯЯ ПРОВЕРКА MCAP ───────────────────────────────────────────────────
-    # Тянем только Dexscreener первым — если токен уже крупнее $2M, это не
-    # свежий микро-мемкоин, и нет смысла жечь Helius/RugCheck запросы на него.
-    early_dex = await get_dex_data(session, ca)
-    early_mcap = early_dex.get("mcap", 0.0) or 0.0
-    if early_mcap > config.MAX_SAFE_MCAP_USD:
-        log.info(
-            f"SKIP oversized token: {symbol} ({ca[:8]}...) "
-            f"MCap=${early_mcap:,.0f} > ${config.MAX_SAFE_MCAP_USD:,.0f}"
-        )
-        return None
-
+    # ── ВСЕ 5 API-ВЫЗОВОВ ПАРАЛЛЕЛЬНО ─────────────────────────────────────────
+    # Раньше: Dexscreener → потом gather(mint, holders, rugcheck, creator)
+    # Теперь: gather(dex, mint, holders, rugcheck, creator) одновременно.
+    # Экономия: время Dexscreener больше не добавляется к времени gather.
     results = await asyncio.gather(
+        get_dex_data(session, ca),
         get_mint_info(session, ca),
         get_largest_accounts(session, ca),
         check_rugcheck(session, ca),
@@ -633,11 +633,16 @@ async def analyze_token(
         return_exceptions=True,
     )
 
-    mint_info   = results[0] if not isinstance(results[0], Exception) else {}
-    holder_info = results[1] if not isinstance(results[1], Exception) else {}
-    rc_raw      = results[2] if not isinstance(results[2], Exception) else {}
-    dex         = early_dex   # уже получено выше, повторный запрос не нужен
-    creator_res = results[3] if not isinstance(results[3], Exception) else {"score": 50}
+    dex         = results[0] if not isinstance(results[0], Exception) else {}
+    mint_info   = results[1] if not isinstance(results[1], Exception) else {}
+    holder_info = results[2] if not isinstance(results[2], Exception) else {}
+    rc_raw      = results[3] if not isinstance(results[3], Exception) else {}
+    creator_res = results[4] if not isinstance(results[4], Exception) else {"score": 50}
+
+    # ── РАННЯЯ ПРОВЕРКА MCAP — после gather (нет смысла было делать это раньше) ─
+    early_mcap = dex.get("mcap", 0.0) or 0.0
+    if early_mcap > config.MAX_SAFE_MCAP_USD:
+        return None
 
     rc             = parse_rugcheck(rc_raw)
     creator_score  = creator_res.get("score", 50) if isinstance(creator_res, dict) else 50
@@ -698,6 +703,19 @@ async def analyze_token(
     c_risks, c_greens = creator_flags(c_stats, creator_score)
     risk_flags  = c_risks  + risk_flags
     green_flags = c_greens + green_flags
+
+    # ── SOL_AMOUNT БУСТ ────────────────────────────────────────────────────────
+    # Сколько SOL создатель залил при запуске токена — это реальный skin-in-the-game.
+    # Если создатель вложил много — у него есть мотивация не ругать сразу.
+    # Данные приходят прямо из WebSocket payload (поле solAmount).
+    if sol_amount >= 5.0:
+        confidence = min(100, confidence + 12)
+        green_flags.append(f"💰 Создатель залил {sol_amount:.1f} SOL — серьёзный старт")
+    elif sol_amount >= 2.0:
+        confidence = min(100, confidence + 7)
+        green_flags.append(f"💰 Старт: {sol_amount:.1f} SOL")
+    elif sol_amount >= 0.5:
+        confidence = min(100, confidence + 3)
 
     return TokenAnalysis(
         ca             = ca,

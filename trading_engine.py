@@ -37,6 +37,7 @@ from database import (
     get_open_positions,
     open_position as db_open_position,
     update_position_peak,
+    update_trailing_sl,
     close_position as db_close_position,
     get_daily_pnl_sol,
 )
@@ -185,14 +186,43 @@ class TradingEngine:
         price = dex.get("price", 0.0)
         if price <= 0:
             return
-        if price > pos.get("peak_price", 0):
-            await update_position_peak(pos["ca"], price)
 
+        entry = pos["entry_price"]
+        if entry <= 0:
+            return
+
+        peak = pos.get("peak_price") or entry
+        if price > peak:
+            await update_position_peak(pos["ca"], price)
+            peak = price
+
+        # Читаем актуальные уровни из позиции (могли обновиться через /tp /sl)
+        tp = pos["tp_price"]
+        sl = pos["sl_price"]   # может быть уже trailing-уровень из БД
+
+        # ── Trailing Stop-Loss ─────────────────────────────────────────────────
+        # Активируется при росте на TRAILING_ACTIVATE_PCT% от входа.
+        # SL подтягивается до пика * (1 - TRAILING_PULLBACK_PCT/100).
+        # Никогда не опускает SL ниже текущего уровня.
+        activate_at = entry * (1 + config.TRAILING_ACTIVATE_PCT / 100)
+        if peak >= activate_at:
+            trailing_sl = peak * (1 - config.TRAILING_PULLBACK_PCT / 100)
+            if trailing_sl > sl:
+                sl = trailing_sl
+                await update_trailing_sl(pos["ca"], sl)
+
+        # ── Проверяем триггеры ─────────────────────────────────────────────────
         reason = None
-        if price >= pos["tp_price"]:
+        if price >= tp:
             reason = "take_profit"
-        elif price <= pos["sl_price"]:
-            reason = "stop_loss"
+        elif price <= sl:
+            # определяем: это обычный SL или trailing?
+            original_sl = entry * (1 - pos.get("original_sl_pct", 100) / 100)
+            if sl > (entry * 0.999):   # SL выше точки входа → точно trailing
+                reason = "trailing_stop"
+            else:
+                reason = "stop_loss"
+
         if reason:
             await self._close_position(pos, price, reason)
 
@@ -226,7 +256,9 @@ class TradingEngine:
 
         tag = "📝 PAPER" if pos["mode"] == "paper" else "💸 РЕАЛЬНАЯ"
         emoji = "🟢" if pnl_sol >= 0 else "🔴"
-        reason_str = "🎯 Take Profit" if reason == "take_profit" else "🛑 Stop Loss"
+        if reason == "take_profit":      reason_str = "🎯 Take Profit"
+        elif reason == "trailing_stop":  reason_str = "📈 Trailing Stop"
+        else:                            reason_str = "🛑 Stop Loss"
         await self._notify(
             f"{tag} ПРОДАЖА: <b>{pos['symbol']}</b> — {reason_str}\n"
             f"{emoji} PnL: <b>{pnl_pct:+.1f}%</b> ({pnl_sol:+.4f} SOL)\n"
