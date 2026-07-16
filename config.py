@@ -42,7 +42,7 @@ RUGCHECK_CONCURRENCY:    int = 8
 DEXSCREENER_CONCURRENCY: int = 10
 
 # Retry
-RETRY_DELAYS: list[int] = [25, 30, 50]
+RETRY_DELAYS: list[int] = [30, 60, 120]
 MAX_RETRIES:  int = 3
 
 # Filters
