@@ -42,14 +42,24 @@ RUGCHECK_CONCURRENCY:    int = 8
 DEXSCREENER_CONCURRENCY: int = 10
 
 # Retry
+<<<<<<< HEAD
+<<<<<<< HEAD
 RETRY_DELAYS: list[int] = [45]   # один ретрай через 45с — было 3 попытки
 MAX_RETRIES:  int = 1              # было 3 — 84k ретраев это слишком много
 
+=======
+RETRY_DELAYS: list[int] = [25, 30, 50]
+MAX_RETRIES:  int = 3
+>>>>>>> parent of faba75b (FIX(cRASH))
+=======
+RETRY_DELAYS: list[int] = [30, 60, 120]
+MAX_RETRIES:  int = 3
+>>>>>>> parent of a45ad20 (UPDATE3.0)
 
 # Filters
-MIN_CONFIDENCE_SCORE: int   = 35       # снизили ещё — 12 алертов за 73ч слишком мало
+MIN_CONFIDENCE_SCORE: int   = 40       # было 50 — снижаем чтобы больше алертов
 MAX_AGE_MINUTES:      float = 30.0     # было 15 — даём токенам больше времени
-MIN_LIQUIDITY_USD:    float = 300.0       # снизили — $500 режет слишком много токенов
+MIN_LIQUIDITY_USD:    float = 500.0       # подняли с 200 — меньше pump-and-dump
 AUTO_COOLDOWN_DROP:   float = 0.20
 
 # ── ЖЁСТКИЙ ПОТОЛОК MCAP ──────────────────────────────────────────────────────
@@ -107,7 +117,6 @@ DEFAULT_MAX_POSITIONS:         int   = 5
 DEFAULT_MIN_CONFIDENCE_TRADE:  int   = 55
 DEFAULT_DAILY_LOSS_LIMIT_SOL:  float = 1.0
 DEFAULT_PAPER_BALANCE_SOL:     float = 5.0
-DEFAULT_TRAILING_STOP:         bool  = False   # ВЫКЛ по умолчанию — пользователь включает сам
 
 DEFAULT_SLIPPAGE_PCT:     int   = 15
 DEFAULT_PRIORITY_FEE_SOL: float = 0.0005
