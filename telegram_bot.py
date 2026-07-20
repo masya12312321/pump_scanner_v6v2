@@ -344,6 +344,38 @@ def register_commands(
 
     # ═══════════════════════════ АВТОТОРГОВЛЯ ═══════════════════════════════════
 
+    @dp.message(Command("trailing"))
+    async def cmd_trailing(m: Message) -> None:
+        args = m.text.split()[1:]
+        s = await get_trading_settings()
+        if not args:
+            status = "✅ ВКЛ" if s.get("trailing_stop_enabled") else "⛔ ВЫКЛ"
+            await m.answer(
+                f"📈 Trailing Stop: <b>{status}</b>\n\n"
+                f"Активируется при +{config.TRAILING_ACTIVATE_PCT:.0f}% от входа,\n"
+                f"SL подтягивается до -{config.TRAILING_PULLBACK_PCT:.0f}% от пика.\n\n"
+                f"Включить: /trailing on\nВыключить: /trailing off",
+                parse_mode="HTML",
+            )
+            return
+        sub = args[0].lower()
+        if sub not in ("on", "off"):
+            await m.answer("Использование: /trailing on | /trailing off")
+            return
+        enabled = sub == "on"
+        await update_trading_settings(trailing_stop_enabled=enabled)
+        if enabled:
+            await m.answer(
+                f"✅ Trailing Stop включён.\n"
+                f"Активируется при +{config.TRAILING_ACTIVATE_PCT:.0f}%, "
+                f"SL = -{config.TRAILING_PULLBACK_PCT:.0f}% от пика.",
+            )
+        else:
+            await m.answer(
+                "⛔ Trailing Stop выключен.\n"
+                "Бот будет держать позицию строго до TP или SL."
+            )
+
     @dp.message(Command("trading"))
     async def cmd_trading(m: Message) -> None:
         s = await get_trading_settings()
@@ -352,6 +384,7 @@ def register_commands(
         daily_pnl = await get_daily_pnl_sol(int(time.time()) - 86400)
         mode_str = "📝 PAPER (симуляция)" if s["paper_mode"] else "💸 РЕАЛЬНЫЙ"
         auto_str = "✅ ВКЛ" if s["autotrade_enabled"] else "⛔ ВЫКЛ"
+        trailing_str = "✅ ВКЛ" if s.get("trailing_stop_enabled") else "⛔ ВЫКЛ"
         await m.answer(
             f"🤖 <b>Автоторговля</b>\n\n"
             f"Режим: <b>{mode_str}</b>\n"
@@ -359,6 +392,7 @@ def register_commands(
             f"💰 Сумма/сделку: <b>{s['position_size_sol']:g} SOL</b>\n"
             f"🎯 Take Profit: <b>+{s['take_profit_pct']:.0f}%</b>\n"
             f"🛑 Stop Loss: <b>-{s['stop_loss_pct']:.0f}%</b>\n"
+            f"📈 Trailing Stop: <b>{trailing_str}</b>\n"
             f"📦 Позиций открыто: <b>{open_n}/{s['max_positions']}</b>\n"
             f"🎚 Мин. confidence: <b>{s['min_confidence_trade']}/100</b>\n"
             f"🛑 Дневной лимит убытка: <b>{s['daily_loss_limit_sol']:g} SOL</b> "
@@ -366,7 +400,7 @@ def register_commands(
             f"📊 Сделок всего: <b>{st['trades_count']}</b> · "
             f"Винрейт: <b>{st['win_rate']:.0f}%</b> · "
             f"Total PnL: <b>{st['total_pnl_sol']:+.4f} SOL</b>\n\n"
-            f"⚙️ /autotrade on|off · /paper on|off\n"
+            f"⚙️ /autotrade /paper /trailing\n"
             f"⚙️ /amount /tp /sl /maxpos /minconf /dailylimit\n"
             f"📂 /positions · 📊 /pnl · 👛 /wallet",
             parse_mode="HTML",

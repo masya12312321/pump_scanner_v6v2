@@ -82,6 +82,7 @@ async def init_db() -> None:
             min_confidence_trade  INTEGER NOT NULL DEFAULT 55,
             daily_loss_limit_sol  REAL    NOT NULL DEFAULT 1.0,
             paper_balance_sol     REAL    NOT NULL DEFAULT 5.0,
+            trailing_stop_enabled INTEGER NOT NULL DEFAULT 0,
             updated_at            INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS positions (
@@ -120,8 +121,8 @@ async def init_db() -> None:
         "INSERT OR IGNORE INTO trading_settings "
         "(id, paper_mode, autotrade_enabled, position_size_sol, take_profit_pct, "
         " stop_loss_pct, max_positions, min_confidence_trade, daily_loss_limit_sol, "
-        " paper_balance_sol, updated_at) "
-        "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " paper_balance_sol, trailing_stop_enabled, updated_at) "
+        "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             1 if _cfg.DEFAULT_PAPER_MODE else 0,
             1 if _cfg.DEFAULT_AUTOTRADE_ENABLED else 0,
@@ -132,6 +133,7 @@ async def init_db() -> None:
             _cfg.DEFAULT_MIN_CONFIDENCE_TRADE,
             _cfg.DEFAULT_DAILY_LOSS_LIMIT_SOL,
             _cfg.DEFAULT_PAPER_BALANCE_SOL,
+            1 if _cfg.DEFAULT_TRAILING_STOP else 0,
             int(time.time()),
         )
     )
@@ -381,15 +383,16 @@ async def save_learned_weights(weights: dict[str, float]) -> None:
 _TRADING_FIELDS = {
     "paper_mode", "autotrade_enabled", "position_size_sol", "take_profit_pct",
     "stop_loss_pct", "max_positions", "min_confidence_trade",
-    "daily_loss_limit_sol", "paper_balance_sol",
+    "daily_loss_limit_sol", "paper_balance_sol", "trailing_stop_enabled",
 }
 
 
 async def get_trading_settings() -> dict:
     row = await pool.fetchone("SELECT * FROM trading_settings WHERE id=1")
     d = dict(row)
-    d["paper_mode"]        = bool(d["paper_mode"])
-    d["autotrade_enabled"] = bool(d["autotrade_enabled"])
+    d["paper_mode"]             = bool(d["paper_mode"])
+    d["autotrade_enabled"]      = bool(d["autotrade_enabled"])
+    d["trailing_stop_enabled"]  = bool(d.get("trailing_stop_enabled", 0))
     return d
 
 

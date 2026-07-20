@@ -99,3 +99,11 @@ def get_cache() -> CacheManager:
     if _cache is None:
         _cache = CacheManager()
     return _cache
+
+
+async def cache_cleanup_loop() -> None:
+    import asyncio
+    while True:
+        await asyncio.sleep(60)
+        if _cache is not None:
+            await _cache.cleanup()
