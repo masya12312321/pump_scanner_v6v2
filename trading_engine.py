@@ -201,15 +201,16 @@ class TradingEngine:
         sl = pos["sl_price"]   # может быть уже trailing-уровень из БД
 
         # ── Trailing Stop-Loss ─────────────────────────────────────────────────
-        # Активируется при росте на TRAILING_ACTIVATE_PCT% от входа.
-        # SL подтягивается до пика * (1 - TRAILING_PULLBACK_PCT/100).
-        # Никогда не опускает SL ниже текущего уровня.
-        activate_at = entry * (1 + config.TRAILING_ACTIVATE_PCT / 100)
-        if peak >= activate_at:
-            trailing_sl = peak * (1 - config.TRAILING_PULLBACK_PCT / 100)
-            if trailing_sl > sl:
-                sl = trailing_sl
-                await update_trailing_sl(pos["ca"], sl)
+        # Активируется только если пользователь включил через /trailing on.
+        # По умолчанию ВЫКЛ — бот держит позицию до TP или SL.
+        settings = await get_trading_settings()
+        if settings.get("trailing_stop_enabled", False):
+            activate_at = entry * (1 + config.TRAILING_ACTIVATE_PCT / 100)
+            if peak >= activate_at:
+                trailing_sl = peak * (1 - config.TRAILING_PULLBACK_PCT / 100)
+                if trailing_sl > sl:
+                    sl = trailing_sl
+                    await update_trailing_sl(pos["ca"], sl)
 
         # ── Проверяем триггеры ─────────────────────────────────────────────────
         reason = None
