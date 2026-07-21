@@ -42,8 +42,8 @@ RUGCHECK_CONCURRENCY:    int = 8
 DEXSCREENER_CONCURRENCY: int = 10
 
 # Retry
-RETRY_DELAYS: list[int] = [45]   # один ретрай через 45с — было 3 попытки
-MAX_RETRIES:  int = 1              # было 3 — 84k ретраев это слишком много
+RETRY_DELAYS: list[int] = [30, 90]  # два ретрая: через 30с и 90с
+MAX_RETRIES:  int = 2              # два шанса — токенам нужно время появиться в Dex
 
 
 # Filters

@@ -620,12 +620,28 @@ async def analyze_token(
     if ca in config.KNOWN_MAJOR_TOKENS:
         return None
 
-    # ── ВСЕ 5 API-ВЫЗОВОВ ПАРАЛЛЕЛЬНО ─────────────────────────────────────────
-    # Раньше: Dexscreener → потом gather(mint, holders, rugcheck, creator)
-    # Теперь: gather(dex, mint, holders, rugcheck, creator) одновременно.
-    # Экономия: время Dexscreener больше не добавляется к времени gather.
+    # ── РАННИЙ ЗАПРОС DEX (до остальных API) ───────────────────────────────────
+    # Большинство свежих токенов ещё не появились в Dexscreener в момент
+    # создания — если данных нет, ставим ретрай через 30с и не тратим
+    # Helius/RugCheck лимиты впустую.
+    dex = await get_dex_data(session, ca)
+
+    if dex.get("mcap", 0) == 0 and dex.get("liquidity", 0) == 0:
+        return TokenAnalysis(
+            ca=ca, symbol=token.get("symbol","???"), name=token.get("name","???"),
+            creator=token.get("creator",""), age_min=age_min,
+            mcap=0, price=0, ath=0, liquidity=0,
+            volume_15m=0, volume_5m=0, dex_url="",
+            confidence=0, rug_score=0,
+            needs_retry=True,
+        )
+
+    early_mcap = dex.get("mcap", 0.0) or 0.0
+    if early_mcap > config.MAX_SAFE_MCAP_USD:
+        return None
+
+    # ── ОСТАЛЬНЫЕ 4 API-ВЫЗОВА ПАРАЛЛЕЛЬНО ─────────────────────────────────────
     results = await asyncio.gather(
-        get_dex_data(session, ca),
         get_mint_info(session, ca),
         get_largest_accounts(session, ca),
         check_rugcheck(session, ca),
@@ -633,16 +649,10 @@ async def analyze_token(
         return_exceptions=True,
     )
 
-    dex         = results[0] if not isinstance(results[0], Exception) else {}
-    mint_info   = results[1] if not isinstance(results[1], Exception) else {}
-    holder_info = results[2] if not isinstance(results[2], Exception) else {}
-    rc_raw      = results[3] if not isinstance(results[3], Exception) else {}
-    creator_res = results[4] if not isinstance(results[4], Exception) else {"score": 50}
-
-    # ── РАННЯЯ ПРОВЕРКА MCAP — после gather (нет смысла было делать это раньше) ─
-    early_mcap = dex.get("mcap", 0.0) or 0.0
-    if early_mcap > config.MAX_SAFE_MCAP_USD:
-        return None
+    mint_info   = results[0] if not isinstance(results[0], Exception) else {}
+    holder_info = results[1] if not isinstance(results[1], Exception) else {}
+    rc_raw      = results[2] if not isinstance(results[2], Exception) else {}
+    creator_res = results[3] if not isinstance(results[3], Exception) else {"score": 50}
 
     rc             = parse_rugcheck(rc_raw)
     creator_score  = creator_res.get("score", 50) if isinstance(creator_res, dict) else 50
