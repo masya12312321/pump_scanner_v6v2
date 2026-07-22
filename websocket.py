@@ -16,6 +16,28 @@ from database import is_seen, mark_pending
 
 log = logging.getLogger("WS")
 
+# ── СКАМ-ПАТТЕРНЫ (фильтруются до очереди, без API) ───────────────────────────
+_SCAM_NAME_PATTERNS = re.compile(
+    r"(airdrop|free\s*sol|claim|presale|whitelist|giveaway|migrate|"
+    r"100x|1000x|moonshot|elonmusk|trump|biden|official|safe|legit|"
+    r"rug|scam|test|xxx|porn|nsfw|casino|bet|lottery|ponzi)",
+    re.IGNORECASE,
+)
+_SCAM_SYMBOL_PATTERNS = re.compile(
+    r"^(TEST|SCAM|RUG|XXX|FREE|WIN|BET)$",
+    re.IGNORECASE,
+)
+
+def _is_scam_name(symbol: str, name: str) -> bool:
+    if _SCAM_SYMBOL_PATTERNS.match(symbol.strip()):
+        return True
+    if _SCAM_NAME_PATTERNS.search(name or ""):
+        return True
+    # Слишком длинный символ (>10 символов) — часто скам
+    if len(symbol.strip()) > 10:
+        return True
+    return False
+
 # Дедупликация клонов: PEPE / PEPE2 / PEPE_v2 → один базовый символ
 # Не более 10 токенов с одним именем за скользящий час (было 3 — слишком мало)
 _symbol_seen: dict[str, list[float]] = defaultdict(list)
@@ -115,6 +137,11 @@ async def _handle_message(
 
     # Символ из одного символа или только цифры — очевидный мусор
     if len(symbol.strip()) < 2 or symbol.strip().isdigit():
+        return
+
+    # Скам по паттернам имени — фильтруем до API
+    if _is_scam_name(symbol, name):
+        log.debug(f"SCAM PATTERN: {symbol} / {name}")
         return
 
     # Фильтр клонов

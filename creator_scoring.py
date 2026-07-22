@@ -82,7 +82,7 @@ async def record_outcome(wallet: str, outcome: str, lifetime_minutes: float = 0.
         # его кошелёк: любые новые токены от него будут заблокированы до анализа.
         rugged = s.get("tokens_rugged", 0)
         total  = max(s.get("tokens_created", 1), 1)
-        if rugged >= 5 and (rugged / total) >= 0.80:
+        if rugged >= 3 and (rugged / total) >= 0.70:  # было 5/80% — снижаем порог
             exists = await pool.fetchone(
                 "SELECT 1 FROM blacklist WHERE ca=?", (wallet,)
             )

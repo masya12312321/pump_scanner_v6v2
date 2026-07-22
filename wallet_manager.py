@@ -77,6 +77,18 @@ class Wallet:
         slippage: int = 15, priority_fee: float = 0.0005,
     ) -> dict:
         """Покупка на фиксированную сумму SOL."""
+        # Проверяем баланс ДО отправки транзакции
+        balance = await self.get_balance_sol()
+        min_needed = sol_amount + priority_fee + 0.002  # +0.002 на газ сети
+        if balance < min_needed:
+            return {
+                "ok": False,
+                "error": (
+                    f"Недостаточно SOL: на кошельке {balance:.4f} SOL, "
+                    f"нужно минимум {min_needed:.4f} SOL "
+                    f"({sol_amount:g} покупка + газ + priority fee)"
+                )
+            }
         return await self._trade(
             action="buy", mint=mint, amount=sol_amount,
             denominated_in_sol=True, slippage=slippage, priority_fee=priority_fee,

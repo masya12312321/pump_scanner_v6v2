@@ -95,6 +95,16 @@ async def analysis_worker(
                     stats["blocked_confidence"] = stats.get("blocked_confidence", 0) + 1
                     continue
 
+                # Жёсткий блок: слишком высокий rug_score — скам/honeypot
+                if result.rug_score > 70:
+                    from database import mark_rejected, add_blacklist
+                    await mark_rejected(ca)
+                    # добавляем в блэклист чтобы не анализировать повторно
+                    await add_blacklist(ca, f"rug_score={result.rug_score}")
+                    blacklist.add(ca)
+                    stats["blocked_rug"] = stats.get("blocked_rug", 0) + 1
+                    continue
+
                 if result.liquidity < config.MIN_LIQUIDITY_USD:
                     from database import mark_rejected
                     await mark_rejected(ca)
